@@ -1,13 +1,6 @@
-use std::{
-    env::temp_dir,
-    fmt::Display,
-    fs::{self, File},
-    io::{self, Cursor},
-};
+use std::{fmt::Display, fs, io, process::exit};
 
-use zip::ZipArchive;
-
-use crate::{ProjectConfiguration, prompt, prompt_bool, prompt_options};
+use crate::{ProjectConfiguration, command, prompt, prompt_bool, prompt_options};
 
 use super::Scaffold;
 
@@ -58,53 +51,102 @@ pub struct GradleConfiguration {
 /// A scaffold for Gradle projects.
 pub struct GradleScaffold;
 
-const DOWNLOAD_URL_BASE: &str = "https://services.gradle.org/distributions";
+pub(crate) trait StringExt {
+    fn push_linebreak(&mut self);
+}
+
+impl StringExt for String {
+    fn push_linebreak(&mut self) {
+        self.push('\n');
+    }
+}
 
 impl GradleScaffold {
-    fn download_wrapper(
+    // TODO: multi-module
+    pub(crate) fn setup_buildscripts(
         &self,
-        config: GradleConfiguration,
-    ) -> io::Result<ZipArchive<Cursor<Vec<u8>>>> {
-        let url = format!(
-            "{DOWNLOAD_URL_BASE}/gradle-{}-bin.zip",
-            config.gradle_version
-        );
-        let temp_file_path =
-            temp_dir().join(format!("gradle-wrapper-{}.zip", config.gradle_version));
-        let mut temp_file =
-            File::create(&temp_file_path).expect("Failed creating Gradle wrapper temp file");
+        project: &ProjectConfiguration,
+        config: &GradleConfiguration,
+    ) -> io::Result<()> {
+        let file = project.directory.join("build.gradle.kts");
 
-        let response = reqwest::blocking::get(url).expect("Failed downloading Gradle wrapper");
-        let mut cursor = Cursor::new(
-            response
-                .bytes()
-                .expect("Failed extracting bytes from Gradle response"),
-        );
-        io::copy(&mut cursor, &mut temp_file).expect("Failed writing Gradle zip to temp file");
+        let mut content = String::new();
 
-        let zip_data = fs::read(&temp_file_path).expect("Failed reading Gradle zip");
-        let cursor = Cursor::new(zip_data);
+        if config.language != GradleLanguageType::Unspecified {
+            content.push_str("plugins {");
+            content.push_linebreak();
+            content.push_str("    ");
 
-        let zip = ZipArchive::new(cursor).expect("Failed reading Gradle zip");
-        Ok(zip)
+            content.push_str(match config.language {
+                GradleLanguageType::Java => "java",
+                // TODO: kotlin version support
+                GradleLanguageType::Kotlin => r#"kotlin("jvm") version "2.1.10""#,
+                _ => unreachable!(),
+            });
+
+            content.push_linebreak();
+            content.push('}');
+        }
+
+        fs::write(file, content).expect("Failed writing buildscript");
+        Ok(())
     }
 
-    pub fn setup_wrapper(
+    pub(crate) fn setup_buildsettings(
+        &self,
+        project: &ProjectConfiguration,
+    ) -> io::Result<()> {
+        let file = project.directory.join("settings.gradle.kts");
+
+        let mut content = String::new();
+        content.push_str(&format!("rootProject.name = \"{}\"", project.name));
+
+        fs::write(file, content).expect("Failed writing buildsettings");
+
+        Ok(())
+    }
+
+    pub(crate) fn run_wrapper(
+        &self,
+        project: &ProjectConfiguration,
+        config: &GradleConfiguration,
+    ) -> io::Result<()> {
+        command(
+            "gradle",
+            vec!["wrapper", "--gradle-version", config.gradle_version.as_str()],
+            Some(project.clone().directory),
+            false
+        );
+        Ok(())
+    }
+
+    pub(crate) fn setup_project(
         &self,
         project: ProjectConfiguration,
         config: GradleConfiguration,
     ) -> io::Result<()> {
-        let zip = self.download_wrapper(config)?;
-        
-
+        self.setup_buildsettings(&project)?;
+        self.setup_buildscripts(&project, &config)?;
+        self.run_wrapper(&project, &config)?;
         Ok(())
+    }
+
+    pub(crate) fn check_for_system_install(&self) -> bool {
+        let status = command("bash", vec!["-c", "command -v gradle"], None, true);
+
+        status.success()
     }
 }
 
 impl Scaffold for GradleScaffold {
     type Config = GradleConfiguration;
 
-    fn configure(&mut self, _project: ProjectConfiguration) -> io::Result<Self::Config> {
+    fn configure(&self, _project: ProjectConfiguration) -> io::Result<Self::Config> {
+        if !self.check_for_system_install() {
+            eprintln!("No Gradle system install found!");
+            exit(1);
+        }
+
         let gradle_version = prompt("What Gradle version would you like to use?");
         let group = prompt("What group ID would you like to use?");
         let version = prompt("What version would you like your project to use?");
@@ -138,9 +180,7 @@ impl Scaffold for GradleScaffold {
         })
     }
 
-    fn scaffold(&mut self, project: ProjectConfiguration, config: Self::Config) -> io::Result<()> {
-        self.setup_wrapper(project, config)
-            .expect("Failed downloading Gradle wrapper");
-        unimplemented!()
+    fn scaffold(&self, project: ProjectConfiguration, config: Self::Config) -> io::Result<()> {
+        self.setup_project(project, config)
     }
 }

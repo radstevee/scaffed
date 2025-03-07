@@ -11,10 +11,10 @@ pub trait Scaffold {
     type Config: Sized = EmptyConfig;
 
     /// Scaffold the given project.
-    fn scaffold(&mut self, project: ProjectConfiguration, config: Self::Config) -> io::Result<()>;
+    fn scaffold(&self, project: ProjectConfiguration, config: Self::Config) -> io::Result<()>;
 
     /// Get the configuration of this scaffold for the given project.
     /// This is usually done through prompting.
-    fn configure(&mut self, project: ProjectConfiguration) -> io::Result<Self::Config>;
+    fn configure(&self, project: ProjectConfiguration) -> io::Result<Self::Config>;
 }
 
