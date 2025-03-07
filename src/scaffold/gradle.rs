@@ -1,4 +1,11 @@
-use std::{fmt::Display, io};
+use std::{
+    env::temp_dir,
+    fmt::Display,
+    fs::{self, File},
+    io::{self, Cursor},
+};
+
+use zip::ZipArchive;
 
 use crate::{ProjectConfiguration, prompt, prompt_bool, prompt_options};
 
@@ -51,6 +58,49 @@ pub struct GradleConfiguration {
 /// A scaffold for Gradle projects.
 pub struct GradleScaffold;
 
+const DOWNLOAD_URL_BASE: &str = "https://services.gradle.org/distributions";
+
+impl GradleScaffold {
+    fn download_wrapper(
+        &self,
+        config: GradleConfiguration,
+    ) -> io::Result<ZipArchive<Cursor<Vec<u8>>>> {
+        let url = format!(
+            "{DOWNLOAD_URL_BASE}/gradle-{}-bin.zip",
+            config.gradle_version
+        );
+        let temp_file_path =
+            temp_dir().join(format!("gradle-wrapper-{}.zip", config.gradle_version));
+        let mut temp_file =
+            File::create(&temp_file_path).expect("Failed creating Gradle wrapper temp file");
+
+        let response = reqwest::blocking::get(url).expect("Failed downloading Gradle wrapper");
+        let mut cursor = Cursor::new(
+            response
+                .bytes()
+                .expect("Failed extracting bytes from Gradle response"),
+        );
+        io::copy(&mut cursor, &mut temp_file).expect("Failed writing Gradle zip to temp file");
+
+        let zip_data = fs::read(&temp_file_path).expect("Failed reading Gradle zip");
+        let cursor = Cursor::new(zip_data);
+
+        let zip = ZipArchive::new(cursor).expect("Failed reading Gradle zip");
+        Ok(zip)
+    }
+
+    pub fn setup_wrapper(
+        &self,
+        project: ProjectConfiguration,
+        config: GradleConfiguration,
+    ) -> io::Result<()> {
+        let zip = self.download_wrapper(config)?;
+        
+
+        Ok(())
+    }
+}
+
 impl Scaffold for GradleScaffold {
     type Config = GradleConfiguration;
 
@@ -89,6 +139,8 @@ impl Scaffold for GradleScaffold {
     }
 
     fn scaffold(&mut self, project: ProjectConfiguration, config: Self::Config) -> io::Result<()> {
+        self.setup_wrapper(project, config)
+            .expect("Failed downloading Gradle wrapper");
         unimplemented!()
     }
 }
