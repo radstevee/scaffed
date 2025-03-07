@@ -1,12 +1,12 @@
 [package]
-name = "scaffer"
+name = "scaffed"
 version = "0.1.0"
 edition = "2024"
 
 [lib]
-name = "scaffer"
+name = "scaffed"
 path = "src/lib.rs"
 
 [dependencies]
 promkit = "0.7.0"
-reqwest = "0.12.12"
+reqwest = { version = "0.12.12", features = ["blocking"] }
